@@ -1,0 +1,7 @@
+services:
+  iceberg-rest:
+    image: apache/iceberg-rest-fixture:latest
+    
+    # Defines the ports to expose. The format is 'host_port:container_port'.
+    ports:
+      - "8181:8181"
