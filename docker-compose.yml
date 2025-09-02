@@ -5,3 +5,8 @@ services:
     # Defines the ports to expose. The format is 'host_port:container_port'.
     ports:
       - "8181:8181"
+
+    volumes:
+      - /tmp/warehouse:/tmp/warehouse
+    environment:
+      - CATALOG_WAREHOUSE=file:///tmp/warehouse
