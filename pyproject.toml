@@ -6,7 +6,34 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "duckdb>=1.3.2",
-    "faker>=37.6.0",
     "pandas>=2.3.2",
-    "pyiceberg[duckdb]>=0.9.1",
+    "pyarrow>=19.0.1",
+    "pyiceberg[duckdb,pyiceberg-core]==0.10.0rc1",
+    "ruff>=0.12.11",
 ]
+
+[dependency-groups]
+dev = [
+    "duckdb-engine>=0.17.0",
+    "jupysql>=0.11.1",
+    "matplotlib>=3.10.6",
+    "notebook>=7.4.5",
+    "pytest>=8.4.1",
+]
+
+[tool.ruff.lint]
+select = [
+    # pycodestyle
+    "E",
+    # Pyflakes
+    "F",
+    # pyupgrade
+    "UP",
+    # flake8-bugbear
+    "B",
+    # flake8-simplify
+    "SIM",
+    # isort
+    "I"
+]
+ignore = ["UP007", "UP017", "E501", "UP045"]
