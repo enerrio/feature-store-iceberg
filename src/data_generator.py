@@ -1,15 +1,18 @@
+import argparse
+import json
 import random
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Optional
 
 import pyarrow as pa
+from pyiceberg.catalog import Catalog
 from pyiceberg.partitioning import PartitionField, PartitionSpec
 from pyiceberg.schema import Schema
 from pyiceberg.transforms import DayTransform
 from pyiceberg.types import DecimalType, LongType, NestedField, TimestamptzType
 
-from catalog import get_catalog
+from .catalog import get_catalog
 
 
 def _choose_rng(seed: Optional[int]):
@@ -126,10 +129,8 @@ def generate_raw_events(
     }
 
 
-def ingest_raw_events(data: dict[str, pa.Array]):
+def ingest_raw_events(catalog: Catalog, namespace: str, data: dict[str, pa.Array]):
     """Ingest raw events data to Iceberg."""
-    catalog = get_catalog()
-    namespace = "default"
     raw_events_table_name = f"{namespace}.raw_events"
     catalog.create_namespace_if_not_exists(namespace)
     # catalog.drop_table(raw_events_table_name)
@@ -152,32 +153,75 @@ def ingest_raw_events(data: dict[str, pa.Array]):
         # Uncomment next line if you also want hour-level pruning (epoch hours)
         # PartitionField(source_id=ts_id, field_id=200, transform=HourTransform(), name="hour"),
     )
-    table = catalog.create_table_if_not_exists(
+    raw_data_table = catalog.create_table_if_not_exists(
         raw_events_table_name,
         schema=iceberg_schema,
         partition_spec=partition_spec,
     )
-    table.append(raw_events_data)
-    print(f"Raw events ingested to {raw_events_table_name}")
+    raw_data_table.append(raw_events_data)
 
 
 if __name__ == "__main__":
-    # Example: spike user 42 on day 5 (1 of their events that day) by 10x
-    data = generate_raw_events(
-        n_events=1000,
-        n_users=100,
-        days=14,
-        seed=7,
-        anomalies=[{"user_id": 42, "day": 5, "multiplier": 10.0, "n": 1}],
-    )
-    # Print a small sample
-    print("sample:")
-    for k in data:
-        print(f"  {k}: {data[k][:5]}")
-    table = pa.Table.from_pydict(data)
-    print(table.shape)
-    print(table)
-    print(table.schema)
+    parser = argparse.ArgumentParser(description="Data generator & features for Iceberg")
+    subparsers = parser.add_subparsers(dest="cmd", required=True)
+
+    gen = subparsers.add_parser("generate", help="Generate and ingest raw events")
+    gen.add_argument("--namespace", default="default")
+    gen.add_argument("--n-events", type=int, default=1000)
+    gen.add_argument("--n-users", type=int, default=100)
+    gen.add_argument("--days", type=int, default=14)
+    gen.add_argument("--seed", type=int, default=None)
+    gen.add_argument("--batches", type=int, default=1, help="How many batches to ingest (seeds will increment)")
+    gen.add_argument("--anomaly", action="append", default=[], help="JSON object per anomaly spec; may be repeated. Example: '{\"user_id\":42,\"day\":5,\"multiplier\":10.0,\"n\":1}'")
+    gen.add_argument("--anomalies-json", type=str, default=None, help="JSON array of anomaly specs. Example: '[{\"user_id\":42,\"day\":5,\"multiplier\":10.0,\"n\":1}]'")
+    gen.add_argument("--anomaly-file", type=str, default=None, help="Path to JSON or NDJSON file of anomaly specs")
+
+    args = parser.parse_args()
+
     catalog = get_catalog()
-    print(f"namespaces: {catalog.list_namespaces()}")
-    ingest_raw_events(data)
+
+    if args.cmd == "generate":
+        for i in range(args.batches):
+            seed = (args.seed + i) if args.seed is not None else None
+            # Load anomaly specs (from --anomaly multiple, --anomalies-json array, or --anomaly-file)
+            anomaly_specs = []
+            # Individual JSON objects via --anomaly (can repeat)
+            for spec in (args.anomaly or []):
+                spec_obj = json.loads(spec)
+                anomaly_specs.append(spec_obj)
+            # A whole JSON array via --anomalies-json
+            if args.anomalies_json:
+                arr = json.loads(args.anomalies_json)
+                if isinstance(arr, list):
+                    anomaly_specs.extend(arr)
+                else:
+                    raise ValueError("--anomalies-json must be a JSON array")
+            # From a file: either a JSON array or NDJSON (one object per line)
+            if args.anomaly_file:
+                with open(args.anomaly_file) as fh:
+                    content = fh.read().strip()
+                if content:
+                    if content.lstrip().startswith("["):
+                        arr = json.loads(content)
+                        if not isinstance(arr, list):
+                            raise ValueError("--anomaly-file JSON must be an array or NDJSON")
+                        anomaly_specs.extend(arr)
+                    else:
+                        for line in content.splitlines():
+                            line = line.strip()
+                            if not line:
+                                continue
+                            anomaly_specs.append(json.loads(line))
+            data = generate_raw_events(
+                n_events=args.n_events,
+                n_users=args.n_users,
+                days=args.days,
+                seed=seed,
+                anomalies=anomaly_specs,
+            )
+            ingest_raw_events(catalog, args.namespace, data)
+            if anomaly_specs:
+                print(f"Ingested {args.n_events} raw events to {args.namespace}.raw_events (with anomalies)")
+            else:
+                print(f"Ingested {args.n_events} raw events to {args.namespace}.raw_events (no anomalies)")
+

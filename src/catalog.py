@@ -1,7 +1,7 @@
-from pyiceberg.catalog import load_catalog
+from pyiceberg.catalog import Catalog, load_catalog
 
 
-def get_catalog():
+def get_catalog() -> Catalog:
     """Single source of truth for catalog configuration."""
     return load_catalog(
         "rest",
