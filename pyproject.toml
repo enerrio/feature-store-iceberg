@@ -21,6 +21,9 @@ dev = [
     "pytest>=8.4.1",
 ]
 
+[tool.ruff]
+exclude = ["*.ipynb"]
+
 [tool.ruff.lint]
 select = [
     # pycodestyle
