@@ -1,0 +1,21 @@
+[
+    {
+        "user_id": 42,
+        "day": 5,
+        "multiplier": 10.0,
+        "proportion": 0.5,
+        "n": 1
+    },
+    {
+        "user_id": 21,
+        "day": 5,
+        "multiplier": 15.0,
+        "proportion": 0.5
+    },
+    {
+        "user_id": 21,
+        "day": 6,
+        "multiplier": 15.0,
+        "proportion": 0.5
+    }
+]
