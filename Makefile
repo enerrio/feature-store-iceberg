@@ -6,6 +6,7 @@ DAYS      ?= 30
 SEED      ?= 7
 BATCHES   ?= 2
 ICEBERG_REST_URI ?= http://localhost:8181
+ICEBERG_WAREHOUSE ?= file:///tmp/warehouse
 FEATURES_SQL ?= sql/gapfilled_7day_spend.sql
 # ------------------------------------------------------------------------------
 

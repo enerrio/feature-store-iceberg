@@ -1,3 +1,5 @@
+import os
+
 from pyiceberg.catalog import Catalog, load_catalog
 
 
@@ -7,7 +9,7 @@ def get_catalog() -> Catalog:
         "rest",
         **{
             "type": "rest",
-            "uri": "http://localhost:8181/",
-            "warehouse": "file:///tmp/warehouse",
+            "uri": os.getenv("ICEBERG_REST_URI", "http://localhost:8181/"),
+            "warehouse": os.getenv("ICEBERG_WAREHOUSE", "file:///tmp/warehouse"),
         },
     )
