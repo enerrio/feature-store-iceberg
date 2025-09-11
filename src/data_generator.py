@@ -162,7 +162,9 @@ def ingest_raw_events(catalog: Catalog, namespace: str, data: dict[str, pa.Array
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Data generator & features for Iceberg")
+    parser = argparse.ArgumentParser(
+        description="Data generator & features for Iceberg"
+    )
     subparsers = parser.add_subparsers(dest="cmd", required=True)
 
     gen = subparsers.add_parser("generate", help="Generate and ingest raw events")
@@ -171,10 +173,30 @@ if __name__ == "__main__":
     gen.add_argument("--n-users", type=int, default=100)
     gen.add_argument("--days", type=int, default=14)
     gen.add_argument("--seed", type=int, default=None)
-    gen.add_argument("--batches", type=int, default=1, help="How many batches to ingest (seeds will increment)")
-    gen.add_argument("--anomaly", action="append", default=[], help="JSON object per anomaly spec; may be repeated. Example: '{\"user_id\":42,\"day\":5,\"multiplier\":10.0,\"n\":1}'")
-    gen.add_argument("--anomalies-json", type=str, default=None, help="JSON array of anomaly specs. Example: '[{\"user_id\":42,\"day\":5,\"multiplier\":10.0,\"n\":1}]'")
-    gen.add_argument("--anomaly-file", type=str, default=None, help="Path to JSON or NDJSON file of anomaly specs")
+    gen.add_argument(
+        "--batches",
+        type=int,
+        default=1,
+        help="How many batches to ingest (seeds will increment)",
+    )
+    gen.add_argument(
+        "--anomaly",
+        action="append",
+        default=[],
+        help='JSON object per anomaly spec; may be repeated. Example: \'{"user_id":42,"day":5,"multiplier":10.0,"n":1}\'',
+    )
+    gen.add_argument(
+        "--anomalies-json",
+        type=str,
+        default=None,
+        help='JSON array of anomaly specs. Example: \'[{"user_id":42,"day":5,"multiplier":10.0,"n":1}]\'',
+    )
+    gen.add_argument(
+        "--anomaly-file",
+        type=str,
+        default=None,
+        help="Path to JSON or NDJSON file of anomaly specs",
+    )
 
     args = parser.parse_args()
 
@@ -186,7 +208,7 @@ if __name__ == "__main__":
             # Load anomaly specs (from --anomaly multiple, --anomalies-json array, or --anomaly-file)
             anomaly_specs = []
             # Individual JSON objects via --anomaly (can repeat)
-            for spec in (args.anomaly or []):
+            for spec in args.anomaly or []:
                 spec_obj = json.loads(spec)
                 anomaly_specs.append(spec_obj)
             # A whole JSON array via --anomalies-json
@@ -204,7 +226,9 @@ if __name__ == "__main__":
                     if content.lstrip().startswith("["):
                         arr = json.loads(content)
                         if not isinstance(arr, list):
-                            raise ValueError("--anomaly-file JSON must be an array or NDJSON")
+                            raise ValueError(
+                                "--anomaly-file JSON must be an array or NDJSON"
+                            )
                         anomaly_specs.extend(arr)
                     else:
                         for line in content.splitlines():
@@ -221,7 +245,10 @@ if __name__ == "__main__":
             )
             ingest_raw_events(catalog, args.namespace, data)
             if anomaly_specs:
-                print(f"Ingested {args.n_events} raw events to {args.namespace}.raw_events (with anomalies)")
+                print(
+                    f"Ingested {args.n_events} raw events to {args.namespace}.raw_events (with anomalies)"
+                )
             else:
-                print(f"Ingested {args.n_events} raw events to {args.namespace}.raw_events (no anomalies)")
-
+                print(
+                    f"Ingested {args.n_events} raw events to {args.namespace}.raw_events (no anomalies)"
+                )
