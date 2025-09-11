@@ -1,16 +1,12 @@
 services:
-  iceberg-rest:
+  iceberg-rest-test:
     image: apache/iceberg-rest-fixture:latest
     
     # Defines the ports to expose. The format is 'host_port:container_port'.
     ports:
-      - "8181:8181"
+      - "8182:8181"
 
     volumes:
-      - /tmp/warehouse:/tmp/warehouse
-      # - warehouse:/tmp/warehouse
+      - /tmp/test-warehouse:/tmp/warehouse
     environment:
       - CATALOG_WAREHOUSE=file:///tmp/warehouse
-
-# volumes:
-#   warehouse:
