@@ -4,6 +4,7 @@ from typing import Optional
 import pyarrow as pa
 from pyiceberg.partitioning import PartitionField, PartitionSpec
 from pyiceberg.schema import Schema
+from pyiceberg.table.snapshots import Snapshot
 from pyiceberg.transforms import DayTransform
 from pyiceberg.types import (
     DateType,
@@ -59,13 +60,12 @@ class FeatureStore:
         trained_at: datetime,
         feature_snapshot_id: int,
         raw_events_snapshot_id: int,
-        *,
         feature_name: str,
         decision_threshold: float,
         training_window_start: date,
         training_window_end: date,
         quantile: Optional[float] = None,
-    ):
+    ) -> None:
         """Record that model X was trained with snapshot Y and calibrated threshold."""
         model_snapshot_table = pa.Table.from_pylist(
             [
@@ -85,7 +85,7 @@ class FeatureStore:
         )
         self.model_table.append(model_snapshot_table)
 
-    def _get_model_snapshot(self, model_version: str):
+    def _get_model_snapshot(self, model_version: str) -> Snapshot:
         """Look up snapshot from model metadata table for a given model version."""
         # Look up features table snapshot from metadata
         model_metadata_filtered = self.model_table.scan(
@@ -95,7 +95,6 @@ class FeatureStore:
         if model_metadata_filtered.num_rows == 0:
             raise ValueError(f"Model version {model_version} not found")
         if model_metadata_filtered.num_rows > 1:
-            # Take the latest? Raise error? What's your strategy?
             raise ValueError(
                 f"Expected one model, found {model_metadata_filtered.num_rows}"
             )
@@ -119,7 +118,7 @@ class FeatureStore:
         )
         return scan.to_arrow()
 
-    def get_current_snapshot_ids(self):
+    def get_current_snapshot_ids(self) -> dict[str, int]:
         """Get latest snapshot IDs for both tables."""
         return {
             "features": self.feature_table.current_snapshot().snapshot_id,
@@ -165,7 +164,9 @@ if __name__ == "__main__":
         training_window_end=datetime(2025, 9, 3).date(),
         quantile=0.995,
     )
-    table = fs.get_training_data(model_version, datetime(2025, 8, 29), datetime(2025, 9, 3))
+    table = fs.get_training_data(
+        model_version, datetime(2025, 8, 29), datetime(2025, 9, 3)
+    )
     print(f"Model version: {model_version}")
     print(f"Got training data from snapshot: {table.shape}")
     print(table.column_names)
