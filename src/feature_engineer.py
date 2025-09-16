@@ -5,6 +5,7 @@ from pyiceberg.partitioning import PartitionField, PartitionSpec
 from pyiceberg.schema import Schema
 from pyiceberg.transforms import IdentityTransform
 from pyiceberg.types import DateType, DecimalType, LongType, NestedField
+from rich import print
 
 from .catalog import get_catalog
 
@@ -31,6 +32,7 @@ def create_features(namespace: str, sql_path: str, rest_uri: str) -> int:
     with open(sql_path) as f:
         sql = f.read()
 
+    sql = sql.format(namespace=namespace)
     arrow_table = conn.execute(sql).fetch_arrow_table()
 
     schema = Schema(
