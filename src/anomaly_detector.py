@@ -1,5 +1,7 @@
+import argparse
+import json
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import numpy as np
@@ -33,7 +35,6 @@ class ThresholdAnomalyDetector:
         quantile: float = 0.995,
     ) -> str:
         """Calibrate a z-score threshold and register the run in the feature store."""
-
         window_start = start_date.strftime("%Y-%m-%d")
         window_end = end_date.strftime("%Y-%m-%d")
         features = self.fs.feature_table.scan(
@@ -125,7 +126,6 @@ class ThresholdAnomalyDetector:
         lookback_days: int = 14,
     ) -> dict:
         """Return decision details plus the exact feature slice used for scoring."""
-
         metadata = self.fs.get_model_metadata(model_version)
         decision = self.detect(
             user_id=user_id,
@@ -193,25 +193,114 @@ class ThresholdAnomalyDetector:
         return float(valid.mean()), float(valid.std(ddof=0))
 
 
-if __name__ == "__main__":
-    feature_store = FeatureStore("default")
-    start_date = datetime(2025, 8, 1)
-    end_date = datetime(2025, 9, 13)
-    user_id = 42
-    amount = 3.59
-    as_of = datetime(2025, 9, 14)
-
-    detector = ThresholdAnomalyDetector(feature_store)
-
-    model_version = detector.train(start_date, end_date)
-
-    result = detector.detect(user_id, amount, as_of, model_version=model_version)
-    print(result)
-
-    report = detector.debug_detection(
-        user_id=user_id,
-        flagged_date=as_of,
-        actual_amount=amount,
-        model_version=model_version,
+def _build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Threshold anomaly detector CLI")
+    parser.add_argument(
+        "--namespace",
+        default="default",
+        help="Iceberg namespace to use when instantiating the feature store",
     )
-    print(report)
+
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    train = subparsers.add_parser("train", help="Calibrate and register a model")
+    train.add_argument("--model-version", help="Explicit model version to register")
+    train.add_argument("--feature-name", default="spending_mean_7d")
+    train.add_argument("--quantile", type=float, default=0.995)
+    train.add_argument("--start-date", help="ISO date for the start of the training window")
+    train.add_argument("--end-date", help="ISO date for the end of the training window")
+    train.add_argument(
+        "--window-days",
+        type=int,
+        default=30,
+        help="Fallback training window size if explicit dates are omitted",
+    )
+
+    detect = subparsers.add_parser("detect", help="Score a single transaction")
+    detect.add_argument("--model-version", required=True)
+    detect.add_argument("--user-id", type=int, required=True)
+    detect.add_argument("--amount", type=float, required=True)
+    detect.add_argument("--as-of", help="ISO timestamp of the transaction")
+    detect.add_argument("--override-threshold", type=float)
+
+    debug = subparsers.add_parser("debug", help="Explain why a transaction was flagged")
+    debug.add_argument("--model-version", required=True)
+    debug.add_argument("--user-id", type=int, required=True)
+    debug.add_argument("--amount", type=float, required=True)
+    debug.add_argument("--as-of", help="ISO timestamp for the flagged transaction")
+    debug.add_argument("--lookback-days", type=int, default=14)
+
+    return parser
+
+
+def _parse_datetime(value: str) -> datetime:
+    parsed = datetime.fromisoformat(value)
+    if parsed.tzinfo is not None:
+        return parsed.astimezone().replace(tzinfo=None)
+    return parsed
+
+
+def _resolve_training_window(args) -> tuple[datetime, datetime]:
+    now = datetime.now(timezone.utc)
+    end = _parse_datetime(args.end_date) if args.end_date else now
+    start = _parse_datetime(args.start_date) if args.start_date else end - timedelta(days=args.window_days)
+    if start > end:
+        raise ValueError("start date must be before end date")
+    return start, end
+
+
+def _parse_as_of(as_of: Optional[str]) -> datetime:
+    if as_of:
+        return _parse_datetime(as_of)
+    return datetime.now(timezone.utc)
+
+
+def main(argv: Optional[list[str]] = None) -> None:
+    parser = _build_parser()
+    args = parser.parse_args(argv)
+
+    detector = ThresholdAnomalyDetector(FeatureStore(args.namespace))
+
+    if args.command == "train":
+        start, end = _resolve_training_window(args)
+        model_version = detector.train(
+            start,
+            end,
+            model_version=args.model_version,
+            feature_name=args.feature_name,
+            quantile=args.quantile,
+        )
+        output = {
+            "model_version": model_version,
+            "trained_window": {
+                "start": start.date().isoformat(),
+                "end": end.date().isoformat(),
+            },
+        }
+        print(json.dumps(output, indent=2))
+    elif args.command == "detect":
+        as_of = _parse_as_of(args.as_of)
+        result = detector.detect(
+            user_id=args.user_id,
+            amount=args.amount,
+            as_of=as_of,
+            model_version=args.model_version,
+            override_threshold=args.override_threshold,
+        )
+        print(json.dumps(result.__dict__, indent=2))
+    elif args.command == "debug":
+        as_of = _parse_as_of(args.as_of)
+        report = detector.debug_detection(
+            user_id=args.user_id,
+            flagged_date=as_of,
+            actual_amount=args.amount,
+            model_version=args.model_version,
+            lookback_days=args.lookback_days,
+        )
+        print(json.dumps(report, indent=2, default=str))
+    else:
+        parser.error("Unknown command")
+
+
+if __name__ == "__main__":
+    main()
