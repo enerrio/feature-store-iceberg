@@ -3,7 +3,7 @@ WITH bounds AS (
     SELECT user_id,
         MIN(CAST(event_timestamp AS DATE)) AS start_dt,
         MAX(CAST(event_timestamp AS DATE)) AS end_dt
-    FROM icecat.default.raw_events
+    FROM icecat.{namespace}.raw_events
     GROUP BY 1
 ),
 calendar AS (
@@ -19,7 +19,7 @@ daily AS (
     SELECT user_id,
         CAST(event_timestamp AS DATE) AS dt,
         SUM(amount) AS daily_spend
-    FROM icecat.default.raw_events
+    FROM icecat.{namespace}.raw_events
     GROUP BY 1,
         2
 ),
