@@ -11,6 +11,7 @@ from pyiceberg.partitioning import PartitionField, PartitionSpec
 from pyiceberg.schema import Schema
 from pyiceberg.transforms import DayTransform
 from pyiceberg.types import DecimalType, LongType, NestedField, TimestamptzType
+from rich import print
 
 from .catalog import get_catalog
 
@@ -129,11 +130,10 @@ def generate_raw_events(
     }
 
 
-def ingest_raw_events(catalog: Catalog, namespace: str, data: dict[str, pa.Array]):
+def ingest_raw_events(catalog: Catalog, namespace: str, data: dict[str, pa.Array]) -> None:
     """Ingest raw events data to Iceberg."""
     raw_events_table_name = f"{namespace}.raw_events"
     catalog.create_namespace_if_not_exists(namespace)
-    # catalog.drop_table(raw_events_table_name)
     # Define an explicit Iceberg schema using Iceberg types (including TIMESTAMPTZ)
     iceberg_schema = Schema(
         NestedField(1, "id", LongType(), required=True),
