@@ -1,19 +1,19 @@
-from datetime import datetime
+from datetime import date, datetime
+from typing import Optional
 
 import pyarrow as pa
 from pyiceberg.partitioning import PartitionField, PartitionSpec
 from pyiceberg.schema import Schema
 from pyiceberg.transforms import DayTransform
 from pyiceberg.types import (
+    DateType,
     FloatType,
-    IntegerType,
-    ListType,
     LongType,
     NestedField,
     StringType,
-    StructType,
     TimestamptzType,
 )
+from rich import print
 
 from .catalog import get_catalog
 
@@ -26,34 +26,11 @@ class FeatureStore:
             NestedField(2, "trained_at", TimestamptzType(), required=True),
             NestedField(3, "feature_snapshot_id", LongType(), required=True),
             NestedField(4, "raw_events_snapshot_id", LongType(), required=True),
-            NestedField(
-                5,
-                "feature_columns",
-                ListType(
-                    element_id=10, element_type=StringType(), element_required=True
-                ),
-                required=True,
-            ),
-            NestedField(
-                6,
-                "training_params",
-                StructType(
-                    NestedField(11, "seed", IntegerType(), required=True),
-                    NestedField(12, "window", FloatType(), required=False),
-                    NestedField(13, "threshold", FloatType(), required=False),
-                ),
-                required=False,
-            ),
-            NestedField(
-                7,
-                "model_metrics",
-                StructType(
-                    NestedField(14, "accuracy", FloatType(), required=True),
-                    NestedField(15, "precision", FloatType(), required=True),
-                    NestedField(16, "recall", FloatType(), required=True),
-                ),
-                required=True,
-            ),
+            NestedField(5, "feature_name", StringType(), required=True),
+            NestedField(6, "decision_threshold", FloatType(), required=True),
+            NestedField(7, "training_window_start", DateType(), required=True),
+            NestedField(8, "training_window_end", DateType(), required=True),
+            NestedField(9, "quantile", FloatType(), required=False),
         )
 
         ts_id = self.schema.find_field("trained_at").field_id
@@ -82,10 +59,14 @@ class FeatureStore:
         trained_at: datetime,
         feature_snapshot_id: int,
         raw_events_snapshot_id: int,
-        **metadata,
+        *,
+        feature_name: str,
+        decision_threshold: float,
+        training_window_start: date,
+        training_window_end: date,
+        quantile: Optional[float] = None,
     ):
-        """Record that model X was trained with snapshot Y."""
-        # Create/append to model_training_metadata table
+        """Record that model X was trained with snapshot Y and calibrated threshold."""
         model_snapshot_table = pa.Table.from_pylist(
             [
                 {
@@ -93,9 +74,11 @@ class FeatureStore:
                     "trained_at": trained_at,
                     "feature_snapshot_id": feature_snapshot_id,
                     "raw_events_snapshot_id": raw_events_snapshot_id,
-                    "feature_columns": metadata["feature_columns"],
-                    "training_params": metadata["training_params"],
-                    "model_metrics": metadata["model_metrics"],
+                    "feature_name": feature_name,
+                    "decision_threshold": float(decision_threshold),
+                    "training_window_start": training_window_start,
+                    "training_window_end": training_window_end,
+                    "quantile": float(quantile) if quantile is not None else None,
                 }
             ],
             schema=self.schema.as_arrow(),
@@ -137,16 +120,25 @@ class FeatureStore:
         return scan.to_arrow()
 
     def get_current_snapshot_ids(self):
-        """Get latest snapshot IDs for both tables"""
+        """Get latest snapshot IDs for both tables."""
         return {
             "features": self.feature_table.current_snapshot().snapshot_id,
             "raw_events": self.raw_events_table.current_snapshot().snapshot_id,
         }
 
+    def get_model_metadata(self, model_version: str) -> pa.Table:
+        """Get metadata for a specific model version."""
+        scan = self.model_table.scan(
+            row_filter=f"model_version = '{model_version}'"
+        ).to_arrow()
+        if scan.num_rows == 0:
+            raise ValueError(f"Model {model_version} not found")
+        return scan.to_pylist()[0]
+
     def get_features_for_inference(
         self, model_version: str, user_id: int, as_of: datetime
     ) -> pa.Table:
-        """Get features for real-time scoring using the same snapshot as training"""
+        """Get features for real-time scoring using the same snapshot as training."""
         # Use model's feature_snapshot_id
         snapshot = self._get_model_snapshot(model_version)
         # But filter for specific user and recent time window
@@ -160,23 +152,27 @@ class FeatureStore:
 
 if __name__ == "__main__":
     fs = FeatureStore("default")
-    metadata = {
-        "feature_columns": ["spending_mean_7d"],
-        "training_params": {"seed": 21, "window": 3.0, "threshold": 0.6},
-        "model_metrics": {"accuracy": 0.84, "precision": 0.74, "recall": 0.49},
-    }
     current_snapshot = fs.get_current_snapshot_ids()
+    model_version = f"v{datetime.now().strftime('%Y%m%d%H%M%S')}"
     fs.register_model_training(
-        "v1.2.3",
+        model_version,
         datetime.now().astimezone(),
         current_snapshot["features"],
         current_snapshot["raw_events"],
-        **metadata,
+        feature_name="spending_mean_7d",
+        decision_threshold=0.6,
+        training_window_start=datetime(2025, 8, 29).date(),
+        training_window_end=datetime(2025, 9, 3).date(),
+        quantile=0.995,
     )
-    table = fs.get_training_data("v1.2.3", datetime(2025, 8, 29), datetime(2025, 9, 3))
+    table = fs.get_training_data(model_version, datetime(2025, 8, 29), datetime(2025, 9, 3))
+    print(f"Model version: {model_version}")
     print(f"Got training data from snapshot: {table.shape}")
     print(table.column_names)
     print("Testing getting features for inference")
     table = fs.get_features_for_inference("v1.2.3", "42", datetime.now().astimezone())
     print(f"Got features for inference: {table.shape}")
     print(table.column_names)
+
+    a = fs.get_model_metadata(model_version)
+    print(a)
