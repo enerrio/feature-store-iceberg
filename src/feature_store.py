@@ -1,5 +1,5 @@
 from datetime import date, datetime
-from typing import Optional
+from typing import Any, Optional
 
 import pyarrow as pa
 from pyiceberg.partitioning import PartitionField, PartitionSpec
@@ -20,6 +20,8 @@ from .catalog import get_catalog
 
 
 class FeatureStore:
+    """Convenience wrapper around the Iceberg catalog used in the demos."""
+
     def __init__(self, namespace: str):
         catalog = get_catalog()
         self.schema = Schema(
@@ -66,7 +68,19 @@ class FeatureStore:
         training_window_end: date,
         quantile: Optional[float] = None,
     ) -> None:
-        """Record that model X was trained with snapshot Y and calibrated threshold."""
+        """Persist a model training event and its calibrated threshold.
+
+        Args:
+            model_version: Identifier assigned to the trained model.
+            trained_at: Timestamp when training finished.
+            feature_snapshot_id: Snapshot ID from the `user_features` table.
+            raw_events_snapshot_id: Snapshot ID from the `raw_events` table.
+            feature_name: Feature used to calibrate the decision threshold.
+            decision_threshold: Absolute z-score threshold picked for the model.
+            training_window_start: First day included in the training window.
+            training_window_end: Last day included in the training window.
+            quantile: Optional quantile used when computing the threshold.
+        """
         model_snapshot_table = pa.Table.from_pylist(
             [
                 {
@@ -86,8 +100,17 @@ class FeatureStore:
         self.model_table.append(model_snapshot_table)
 
     def _get_model_snapshot(self, model_version: str) -> Snapshot:
-        """Look up snapshot from model metadata table for a given model version."""
-        # Look up features table snapshot from metadata
+        """Return the feature snapshot associated with `model_version`.
+
+        Args:
+            model_version: Registered model identifier.
+
+        Returns:
+            Snapshot: Iceberg snapshot representing the feature table state.
+
+        Raises:
+            ValueError: If the model version is missing or duplicated.
+        """
         model_metadata_filtered = self.model_table.scan(
             row_filter=f"model_version = '{model_version}'",
             selected_fields=("feature_snapshot_id",),
@@ -107,7 +130,16 @@ class FeatureStore:
     def get_training_data(
         self, model_version: str, start_date: datetime, end_date: datetime
     ) -> pa.Table:
-        """Reproduce exact training dataset for a model."""
+        """Return the training data window used for `model_version`.
+
+        Args:
+            model_version: Registered model identifier.
+            start_date: Inclusive lower bound of the training window.
+            end_date: Inclusive upper bound of the training window.
+
+        Returns:
+            pa.Table: Arrow table containing the feature rows for the window.
+        """
         snapshot = self._get_model_snapshot(model_version)
         # Query features using that snapshot
         start_date_fmt = start_date.strftime("%Y-%m-%d")
@@ -119,14 +151,28 @@ class FeatureStore:
         return scan.to_arrow()
 
     def get_current_snapshot_ids(self) -> dict[str, int]:
-        """Get latest snapshot IDs for both tables."""
+        """Return the latest snapshot IDs for the feature and raw tables.
+
+        Returns:
+            dict[str, int]: Mapping with `features` and `raw_events` keys.
+        """
         return {
             "features": self.feature_table.current_snapshot().snapshot_id,
             "raw_events": self.raw_events_table.current_snapshot().snapshot_id,
         }
 
-    def get_model_metadata(self, model_version: str) -> pa.Table:
-        """Get metadata for a specific model version."""
+    def get_model_metadata(self, model_version: str) -> dict[str, Any]:
+        """Fetch the metadata row registered for `model_version`.
+
+        Args:
+            model_version: Registered model identifier.
+
+        Returns:
+            dict: Row from the metadata table converted to a Python dict.
+
+        Raises:
+            ValueError: If the model version does not exist.
+        """
         scan = self.model_table.scan(
             row_filter=f"model_version = '{model_version}'"
         ).to_arrow()
@@ -137,7 +183,16 @@ class FeatureStore:
     def get_features_for_inference(
         self, model_version: str, user_id: int, as_of: datetime
     ) -> pa.Table:
-        """Get features for real-time scoring using the same snapshot as training."""
+        """Retrieve features for inference using the model's training snapshot.
+
+        Args:
+            model_version: Registered model identifier.
+            user_id: Identifier of the user to fetch features for.
+            as_of: Inclusive upper bound on the feature dates.
+
+        Returns:
+            pa.Table: Arrow table containing the filtered feature rows.
+        """
         # Use model's feature_snapshot_id
         snapshot = self._get_model_snapshot(model_version)
         # But filter for specific user and recent time window

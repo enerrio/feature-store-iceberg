@@ -1,3 +1,5 @@
+"""Generate and ingest synthetic spending data for the feature store demos."""
+
 import argparse
 import json
 import random
@@ -17,6 +19,15 @@ from .catalog import get_catalog
 
 
 def _choose_rng(seed: Optional[int]):
+    """Return a deterministic or global random generator based on `seed`.
+
+    Args:
+        seed: Seed value to make the generator deterministic.
+
+    Returns:
+        Random: Generator with `randrange`/`random` API.
+    """
+
     return random.Random(seed) if seed is not None else random
 
 
@@ -31,22 +42,19 @@ def generate_raw_events(
     """Generate synthetic user events with optional anomaly spikes.
 
     Args:
-        n_events: total number of events to generate.
-        n_users: number of distinct users (user_id in [0, n_users-1]).
-        days: number of days in the window (0-based day index in [0, days-1]).
-        base_date: start of the window; defaults to (today - (days-1)) at 00:00 UTC.
-        seed: optional seed for deterministic generation.
-        anomalies: optional list of anomaly specs. Each spec is a dict with keys:
-            - user_id (int, required): which user to spike.
-            - day (int, required): 0-based day index since base_date (e.g., 5 == day 5).
-            - multiplier (float, optional, default 5.0): multiply amounts by this factor.
-            - proportion (float, optional, default 0.5): fraction of that user's events
-                on that day to spike (0.0-1.0). If `n` is provided, it overrides proportion.
-            - n (int, optional): exact number of events to spike for that (user, day).
+        n_events: Total number of events to generate.
+        n_users: Number of distinct users (`user_id` in `[0, n_users - 1]`).
+        days: Number of days in the window (0-based index `[0, days - 1]`).
+        base_date: Start of the window; defaults to `today - (days - 1)` at 00:00 UTC.
+        seed: Seed for deterministic generation.
+        anomalies: Optional list of anomaly specifications. Each specification is a
+            dictionary supporting the keys `user_id` (int, required), `day` (int,
+            required), `multiplier` (float, default `5.0`), `proportion` (float,
+            default `0.5`), and `n` (int, optional) to override the sampled count.
 
     Returns:
-        A dict of column -> pyarrow arrays with columns:
-            id (int), user_id (int), amount (str), vendor_id (int), event_timestamp (datetime)
+        dict[str, pa.Array]: Mapping of column name to Arrow array (`id`, `user_id`,
+        `amount`, `vendor_id`, `event_timestamp`).
     """
     rng = _choose_rng(seed)
 
@@ -130,8 +138,16 @@ def generate_raw_events(
     }
 
 
-def ingest_raw_events(catalog: Catalog, namespace: str, data: dict[str, pa.Array]) -> None:
-    """Ingest raw events data to Iceberg."""
+def ingest_raw_events(
+    catalog: Catalog, namespace: str, data: dict[str, pa.Array]
+) -> None:
+    """Append generated raw events into the Iceberg `raw_events` table.
+
+    Args:
+        catalog: Loaded Iceberg catalog instance.
+        namespace: Namespace that owns the `raw_events` table.
+        data: Columnar payload returned by :func:`generate_raw_events`.
+    """
     raw_events_table_name = f"{namespace}.raw_events"
     catalog.create_namespace_if_not_exists(namespace)
     # Define an explicit Iceberg schema using Iceberg types (including TIMESTAMPTZ)

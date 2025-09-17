@@ -1,10 +1,16 @@
+"""Helpers for loading the project-wide Iceberg catalog."""
+
 import os
 
 from pyiceberg.catalog import Catalog, load_catalog
 
 
 def get_catalog() -> Catalog:
-    """Single source of truth for catalog configuration."""
+    """Load the REST catalog using environment overrides when available.
+
+    Returns:
+        Catalog: Configured PyIceberg catalog instance.
+    """
     return load_catalog(
         "rest",
         **{

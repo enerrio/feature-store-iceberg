@@ -1,3 +1,5 @@
+"""Threshold-based anomaly detection utilities backed by the feature store."""
+
 import argparse
 import json
 from dataclasses import dataclass
@@ -12,6 +14,8 @@ from .feature_store import FeatureStore
 
 @dataclass(frozen=True)
 class DetectionResult:
+    """Container for the outcome of a single transaction score."""
+
     is_anomaly: bool
     z_score: float
     historical_mean: float
@@ -20,21 +24,39 @@ class DetectionResult:
 
 
 class ThresholdAnomalyDetector:
-    """Minimal detector that leans on the FeatureStore for provenance."""
+    """Calibrates and scores a z-threshold detector using FeatureStore metadata."""
 
     def __init__(self, feature_store: FeatureStore):
+        """Initialize the detector.
+
+        Args:
+            feature_store: Feature store instance providing snapshot lookups.
+        """
         self.fs = feature_store
 
     def train(
         self,
         start_date: datetime,
         end_date: datetime,
-        *,
         model_version: Optional[str] = None,
         feature_name: str = "spending_mean_7d",
         quantile: float = 0.995,
     ) -> str:
-        """Calibrate a z-score threshold and register the run in the feature store."""
+        """Calibrate a z-score threshold and record it in the feature store.
+
+        Args:
+            start_date: Inclusive lower bound of the calibration window.
+            end_date: Inclusive upper bound of the calibration window.
+            model_version: Optional identifier to register; defaults to timestamp.
+            feature_name: Feature column used for calibration.
+            quantile: Quantile of the absolute z-distribution used as the threshold.
+
+        Returns:
+            str: Registered model version.
+
+        Raises:
+            ValueError: If the window yields no rows or only null values.
+        """
         window_start = start_date.strftime("%Y-%m-%d")
         window_end = end_date.strftime("%Y-%m-%d")
         features = self.fs.feature_table.scan(
@@ -79,11 +101,24 @@ class ThresholdAnomalyDetector:
         user_id: int,
         amount: float,
         as_of: datetime,
-        *,
         model_version: str,
         override_threshold: Optional[float] = None,
     ) -> DetectionResult:
-        """Score a transaction using the threshold stored for `model_version`."""
+        """Score a transaction using the stored threshold for `model_version`.
+
+        Args:
+            user_id: Identifier for the user being scored.
+            amount: Observed transaction amount.
+            as_of: Timestamp associated with the transaction.
+            model_version: Registered model identifier to use.
+            override_threshold: Optional manual threshold override.
+
+        Returns:
+            DetectionResult: Structured result containing the score and context.
+
+        Raises:
+            ValueError: If no feature history exists for the requested inputs.
+        """
 
         metadata = self.fs.get_model_metadata(model_version)
         feature_name = metadata["feature_name"]
@@ -121,11 +156,21 @@ class ThresholdAnomalyDetector:
         user_id: int,
         flagged_date: datetime,
         actual_amount: float,
-        *,
         model_version: str,
         lookback_days: int = 14,
     ) -> dict:
-        """Return decision details plus the exact feature slice used for scoring."""
+        """Return decision details plus the historical feature slice for debugging.
+
+        Args:
+            user_id: Identifier for the user being inspected.
+            flagged_date: Timestamp when the transaction was evaluated.
+            actual_amount: Observed transaction amount.
+            model_version: Registered model identifier to use.
+            lookback_days: Number of historical feature points to include.
+
+        Returns:
+            dict: Serializable explanation containing decision context and metadata.
+        """
         metadata = self.fs.get_model_metadata(model_version)
         decision = self.detect(
             user_id=user_id,
@@ -178,7 +223,14 @@ class ThresholdAnomalyDetector:
 
     @staticmethod
     def _to_float_np(array) -> np.ndarray:
-        """Convert a PyArrow array to a dense NumPy array of floats (NaNs preserved)."""
+        """Convert a PyArrow array to a float NumPy array, preserving nulls as NaN.
+
+        Args:
+            array: PyArrow array containing numeric values.
+
+        Returns:
+            np.ndarray: Array of floats with nulls represented by `np.nan`.
+        """
 
         return np.array(
             [float(x) if x is not None else np.nan for x in array.to_pylist()],
@@ -187,6 +239,14 @@ class ThresholdAnomalyDetector:
 
     @staticmethod
     def _safe_stats(values: np.ndarray) -> tuple[float, float]:
+        """Compute mean and standard deviation while ignoring NaN values.
+
+        Args:
+            values: Array of float values that may include `np.nan`.
+
+        Returns:
+            tuple[float, float]: Mean and standard deviation (population) of values.
+        """
         valid = values[~np.isnan(values)]
         if valid.size == 0:
             return 0.0, 0.0
@@ -194,6 +254,11 @@ class ThresholdAnomalyDetector:
 
 
 def _build_parser() -> argparse.ArgumentParser:
+    """Construct the command-line interface for the module.
+
+    Returns:
+        argparse.ArgumentParser: Configured parser with subcommands.
+    """
     parser = argparse.ArgumentParser(description="Threshold anomaly detector CLI")
     parser.add_argument(
         "--namespace",
@@ -207,7 +272,9 @@ def _build_parser() -> argparse.ArgumentParser:
     train.add_argument("--model-version", help="Explicit model version to register")
     train.add_argument("--feature-name", default="spending_mean_7d")
     train.add_argument("--quantile", type=float, default=0.995)
-    train.add_argument("--start-date", help="ISO date for the start of the training window")
+    train.add_argument(
+        "--start-date", help="ISO date for the start of the training window"
+    )
     train.add_argument("--end-date", help="ISO date for the end of the training window")
     train.add_argument(
         "--window-days",
@@ -234,6 +301,14 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def _parse_datetime(value: str) -> datetime:
+    """Parse an ISO timestamp string, normalizing any timezone to naive UTC.
+
+    Args:
+        value: ISO formatted datetime string.
+
+    Returns:
+        datetime: Naive datetime in UTC.
+    """
     parsed = datetime.fromisoformat(value)
     if parsed.tzinfo is not None:
         return parsed.astimezone().replace(tzinfo=None)
@@ -241,21 +316,49 @@ def _parse_datetime(value: str) -> datetime:
 
 
 def _resolve_training_window(args) -> tuple[datetime, datetime]:
+    """Resolve start and end dates for the train command from CLI args.
+
+    Args:
+        args: Parsed command-line namespace with window arguments.
+
+    Returns:
+        tuple[datetime, datetime]: Start and end datetimes.
+
+    Raises:
+        ValueError: If the start date is after the end date.
+    """
     now = datetime.now(timezone.utc)
     end = _parse_datetime(args.end_date) if args.end_date else now
-    start = _parse_datetime(args.start_date) if args.start_date else end - timedelta(days=args.window_days)
+    start = (
+        _parse_datetime(args.start_date)
+        if args.start_date
+        else end - timedelta(days=args.window_days)
+    )
     if start > end:
         raise ValueError("start date must be before end date")
     return start, end
 
 
 def _parse_as_of(as_of: Optional[str]) -> datetime:
+    """Parse the `as_of` timestamp argument, defaulting to now in UTC.
+
+    Args:
+        as_of: Optional ISO datetime string.
+
+    Returns:
+        datetime: Parsed datetime in UTC.
+    """
     if as_of:
         return _parse_datetime(as_of)
     return datetime.now(timezone.utc)
 
 
 def main(argv: Optional[list[str]] = None) -> None:
+    """Execute the CLI with optional argument overrides.
+
+    Args:
+        argv: Optional list of argument strings for testing.
+    """
     parser = _build_parser()
     args = parser.parse_args(argv)
 

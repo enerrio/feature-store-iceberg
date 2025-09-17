@@ -1,3 +1,5 @@
+"""Materialize feature tables from SQL queries into Iceberg."""
+
 import argparse
 
 import duckdb
@@ -11,12 +13,15 @@ from .catalog import get_catalog
 
 
 def create_features(namespace: str, sql_path: str, rest_uri: str) -> int:
-    """Compute gap-filled 7d mean via DuckDB (read-only) and append to Iceberg via PyIceberg.
+    """Materialize the gap-filled 7-day mean feature table.
 
-    - Reads SELECT-only SQL from `sql_path` (must yield columns: user_id (int), dt (date), spending_mean_7d (decimal(15,2))).
-    - Uses DuckDB Iceberg extension to query the REST catalog (read-only) and fetch an Arrow table.
-    - Writes results to `<namespace>.user_features` using PyIceberg (create-if-not-exists, partitioned by dt).
-    Returns number of rows written.
+    Args:
+        namespace: Iceberg namespace target, e.g. `default`.
+        sql_path: Path to the SELECT-only SQL file that produces the features.
+        rest_uri: REST catalog endpoint to which DuckDB should connect.
+
+    Returns:
+        int: Number of feature rows appended to the `user_features` table.
     """
     conn = duckdb.connect()
     conn.execute("INSTALL iceberg; LOAD iceberg;")
