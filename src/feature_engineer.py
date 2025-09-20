@@ -76,6 +76,5 @@ if __name__ == "__main__":
         help="Path to SELECT-only SQL file",
     )
     parser.add_argument("--rest-uri", default=None, help="REST catalog endpoint")
-    parser.add_argument("--warehouse", default=None, help="Warehouse URI")
     args = parser.parse_args()
     create_features(namespace=args.namespace, sql_path=args.sql, rest_uri=args.rest_uri)

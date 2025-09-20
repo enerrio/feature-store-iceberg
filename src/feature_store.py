@@ -14,7 +14,6 @@ from pyiceberg.types import (
     StringType,
     TimestamptzType,
 )
-from rich import print
 
 from .catalog import get_catalog
 
@@ -203,32 +202,3 @@ class FeatureStore:
         )
         return scan.to_arrow()
 
-
-if __name__ == "__main__":
-    fs = FeatureStore("default")
-    current_snapshot = fs.get_current_snapshot_ids()
-    model_version = f"v{datetime.now().strftime('%Y%m%d%H%M%S')}"
-    fs.register_model_training(
-        model_version,
-        datetime.now().astimezone(),
-        current_snapshot["features"],
-        current_snapshot["raw_events"],
-        feature_name="spending_mean_7d",
-        decision_threshold=0.6,
-        training_window_start=datetime(2025, 8, 29).date(),
-        training_window_end=datetime(2025, 9, 3).date(),
-        quantile=0.995,
-    )
-    table = fs.get_training_data(
-        model_version, datetime(2025, 8, 29), datetime(2025, 9, 3)
-    )
-    print(f"Model version: {model_version}")
-    print(f"Got training data from snapshot: {table.shape}")
-    print(table.column_names)
-    print("Testing getting features for inference")
-    table = fs.get_features_for_inference("v1.2.3", "42", datetime.now().astimezone())
-    print(f"Got features for inference: {table.shape}")
-    print(table.column_names)
-
-    a = fs.get_model_metadata(model_version)
-    print(a)

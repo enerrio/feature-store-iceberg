@@ -91,6 +91,7 @@ class TestTimeTravel:
             / "gapfilled_7day_spend.sql",
             rest_uri=TEST_CONFIG["REST_URI"],
         )
+        initialized_feature_store.feature_table.refresh()
 
         # Get training data again with same model version
         later_data = initialized_feature_store.get_training_data(
